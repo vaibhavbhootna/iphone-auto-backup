@@ -2,8 +2,9 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  launchd 配置：iPhone 插入 USB 时自动触发照片备份
-  安装方法：install.sh 自动处理
+  launchd configuration: Auto-triggers photo backup on iPhone USB connection
+  Author: Vaibhav Bhootna
+  Installation: Automatically managed by install.sh
 -->
 <plist version="1.0">
 <dict>
@@ -11,7 +12,7 @@
     <key>Label</key>
     <string>com.user.iphone-photo-backup</string>
 
-    <!-- 照片备份 -->
+    <!-- Photo Backup -->
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
@@ -32,7 +33,7 @@
             <dict>
                 <key>idVendor</key>
                 <integer>1452</integer>
-                <!-- 4776 = 0x12A8 = iPhone/Apple Mobile Device 正常 USB 模式 -->
+                <!-- 1452 = 0x05AC = Apple Inc.; 4776 = 0x12A8 = iPhone/Apple Mobile Device Standard USB Mode -->
                 <key>idProduct</key>
                 <integer>4776</integer>
             </dict>
@@ -50,7 +51,6 @@
     <false/>
     <key>ThrottleInterval</key>
     <integer>15</integer>
-    <!-- 比视频晚 5 秒启动，等 DCIM 完全挂载 -->
 
 </dict>
 </plist>

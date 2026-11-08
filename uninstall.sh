@@ -1,10 +1,15 @@
 #!/bin/bash
-# ============================================================
-# iPhone 视频 & 照片备份工具 - 卸载脚本
-# 只移除 launchd 自动触发；不删除脚本、备份数据或哈希索引
-# ============================================================
+# ==============================================================================
+# iPhone Auto Backup - Uninstallation Script
+# Author: Vaibhav Bhootna
+# Repository: https://github.com/vbv611/iphone-auto-backup
+#
+# This script unregisters and removes the launchd background service.
+# It does NOT remove your local scripts, backup data, or deduplication indexes.
+# ==============================================================================
 
 set -euo pipefail
+umask 077
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=config.sh
@@ -23,7 +28,8 @@ AGENTS=(
 
 echo ""
 echo "=================================================="
-echo "   iPhone 视频 & 照片备份工具 - 卸载程序"
+echo "   iPhone Auto Backup - Uninstaller"
+echo "   Author: Vaibhav Bhootna"
 echo "=================================================="
 echo ""
 
@@ -34,32 +40,32 @@ for name in "${AGENTS[@]}"; do
         launchctl bootout "gui/$(id -u)" "$plist" 2>/dev/null || true
         launchctl unload "$plist" 2>/dev/null || true
         rm -f "$plist"
-        info "已卸载: $name.plist"
+        info "Unregistered and removed: $name.plist"
         removed=$((removed + 1))
     fi
 done
 
 if [[ "$removed" -eq 0 ]]; then
-    warn "未找到已安装的 launchd 配置（可能尚未安装）"
+    warn "No existing launchd configuration found (service may not be installed)."
 fi
 
 echo ""
 echo "=================================================="
 echo ""
-info "卸载完成！"
+info "Uninstallation Complete!"
 echo ""
-echo "  launchd 自动触发：已移除"
-echo "  脚本文件：不受影响（保留在 $SCRIPT_DIR）"
-echo "  备份数据：不受影响"
+echo "  launchd Daemon: Removed."
+echo "  Script Files: Preserved in $SCRIPT_DIR"
+echo "  Backup Data: Preserved on disk:"
 echo "    $BACKUP_ROOT"
 echo "    $PHOTO_BACKUP_ROOT"
-echo "  哈希/状态索引：不受影响（~/.iphone_*_backup_v3.*）"
+echo "  Deduplication / Hash Indexes: Preserved in ~/.iphone_*_backup_v3.*"
 echo ""
-echo "彻底清除索引（不会删除已备份的文件）："
+echo "To permanently clear local deduplication caches (without deleting backups):"
 echo "  rm -f ~/.iphone_video_backup_v3.hashes ~/.iphone_photo_backup_v3.hashes"
 echo "  rm -f ~/.iphone_video_backup_v3.device_seen ~/.iphone_photo_backup_v3.device_seen"
 echo "  rm -f ~/.iphone_video_backup_v3.state ~/.iphone_photo_backup_v3.state"
 echo ""
-echo "如需删除备份文件，请自行确认路径后再删："
+echo "To remove backup data on your drive, verify paths before deleting:"
 echo "  rm -rf \"$BACKUP_ROOT\" \"$PHOTO_BACKUP_ROOT\""
 echo ""

@@ -23,14 +23,14 @@ Thanks for your interest in contributing! This is a small, focused tool, so the 
 ## Code style
 
 - Pure bash, no external dependencies beyond `libimobiledevice` and `exiftool`
-- Comments in Chinese or English (both accepted)
+- Clear English comments and docstrings
 - Functions should be self-contained and readable
 - Test edge cases: empty DCIM, untrusted device, disconnected mid-backup
 
 ## Development setup
 
 ```bash
-git clone https://github.com/andersyin/iphone-auto-backup.git
+git clone https://github.com/vbv611/iphone-auto-backup.git
 cd iphone-auto-backup
 nano config.sh   # required: replace YourExternalDrive before install
 bash install.sh  # Homebrew deps + launchd (macOS)

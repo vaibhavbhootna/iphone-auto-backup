@@ -1,20 +1,28 @@
 #!/bin/bash
-# ============================================================
-# iPhone 视频 & 照片备份工具 - 安装脚本
-# ============================================================
+# ==============================================================================
+# iPhone Auto Backup - Installer
+# Author: Vaibhav Bhootna
+# Repository: https://github.com/vbv611/iphone-auto-backup
+#
+# This script installs required dependencies (libimobiledevice, exiftool) via
+# Homebrew, ensures executable permissions on all project scripts, and registers
+# the background monitor daemon with macOS launchd.
+# ==============================================================================
 
 set -euo pipefail
+umask 077
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=config.sh
 source "$SCRIPT_DIR/config.sh"
 
-# ---------- 彩色输出 ----------
+# ---------- Terminal Formatting Helpers ----------
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
 info()  { echo -e "${GREEN}[✓]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[!]${NC} $*"; }
 err()   { echo -e "${RED}[✗]${NC} $*"; }
 
+# Locate Homebrew executable across Apple Silicon and Intel Mac architectures.
 find_brew() {
     if [[ -x /opt/homebrew/bin/brew ]]; then
         BREW="/opt/homebrew/bin/brew"
@@ -27,110 +35,111 @@ find_brew() {
     fi
 }
 
-# ---------- 检查配置 ----------
+# Verify configuration before proceeding. Rejects unedited template placeholders.
 check_config() {
     echo ""
-    echo "检查配置..."
+    echo "Checking configuration..."
     if config_has_placeholders; then
-        err "config.sh 仍是占位路径 YourExternalDrive。"
-        echo "  请先编辑后再安装："
+        err "config.sh still contains the placeholder 'YourExternalDrive'."
+        echo "  Please edit config.sh before installing:"
         echo "    nano $SCRIPT_DIR/config.sh"
-        echo "  将 BACKUP_ROOT / PHOTO_BACKUP_ROOT 改成你的外置磁盘路径。"
-        echo "  Edit BACKUP_ROOT and PHOTO_BACKUP_ROOT before installing."
+        echo "  Set BACKUP_ROOT and PHOTO_BACKUP_ROOT to your mounted external drive path."
         exit 1
     fi
-    info "备份路径: $BACKUP_ROOT"
-    info "照片路径: $PHOTO_BACKUP_ROOT"
+    info "Video Backup Destination: $BACKUP_ROOT"
+    info "Photo Backup Destination: $PHOTO_BACKUP_ROOT"
 }
 
-# ---------- 检查 Homebrew ----------
+# Verify that Homebrew package manager is installed on the system.
 check_homebrew() {
     echo ""
-    echo "检查 Homebrew..."
+    echo "Checking Homebrew package manager..."
     find_brew
     if [[ -z "$BREW" ]]; then
-        err "未找到 Homebrew，请先安装："
+        err "Homebrew was not found. Please install Homebrew first:"
         echo "  /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
         exit 1
     fi
-    info "Homebrew 已安装 ($("$BREW" --version | head -n 1))"
+    info "Homebrew found ($("$BREW" --version | head -n 1))"
 }
 
+# Check if a specific binary tool is installed and executable.
 tool_installed() {
     local name="$1"
     [[ -x "/opt/homebrew/bin/$name" || -x "/usr/local/bin/$name" ]] || command -v "$name" >/dev/null 2>&1
 }
 
-# ---------- 安装依赖 ----------
+# Ensure libimobiledevice and exiftool are installed.
 check_deps() {
     echo ""
-    echo "检查依赖..."
+    echo "Checking required dependencies..."
 
     if ! tool_installed idevice_id; then
-        warn "未找到 libimobiledevice，正在安装..."
+        warn "libimobiledevice not found. Installing via Homebrew..."
         "$BREW" install libimobiledevice
     else
-        info "libimobiledevice 已安装"
+        info "libimobiledevice is installed"
     fi
 
     if ! tool_installed exiftool; then
-        warn "未找到 ExifTool，正在安装..."
+        warn "exiftool not found. Installing via Homebrew..."
         "$BREW" install exiftool
     else
-        info "ExifTool 已安装"
+        info "ExifTool is installed"
     fi
 
     local prefix
     prefix="$("$BREW" --prefix)"
     if [[ ! -x "$prefix/bin/idevice_id" ]] && ! command -v idevice_id >/dev/null 2>&1; then
-        err "安装后仍找不到 idevice_id（$prefix/bin/idevice_id）"
+        err "Could not locate idevice_id after installation ($prefix/bin/idevice_id)"
         exit 1
     fi
     if [[ ! -x "$prefix/bin/exiftool" ]] && ! command -v exiftool >/dev/null 2>&1; then
-        err "安装后仍找不到 exiftool（$prefix/bin/exiftool）"
+        err "Could not locate exiftool after installation ($prefix/bin/exiftool)"
         exit 1
     fi
 }
 
-# ---------- 设置脚本权限 ----------
+# Grant execution permissions (chmod +x) to all project shell scripts.
 set_perms() {
     echo ""
-    echo "设置脚本权限..."
+    echo "Configuring script permissions..."
     local f
     for f in backup_videos_v3.sh backup_photos_v3.sh iphone_backup_monitor.sh \
-             install.sh uninstall.sh rebuild_hash_index.sh backup_safe.sh; do
+             install.sh uninstall.sh rebuild_hash_index.sh backup_safe.sh \
+             import_image_capture.sh export_editor_manifest.sh; do
         chmod +x "$SCRIPT_DIR/$f"
     done
-    info "脚本已设为可执行"
+    info "Executable permissions applied"
 }
 
-# ---------- 注册 launchd ----------
+# Install and bootstrap a launchd service agent.
 install_plist() {
     local plist_name="$1"
     local plist_src="$SCRIPT_DIR/$plist_name"
     local plist_dest="$HOME/Library/LaunchAgents/$plist_name"
 
     if [[ ! -f "$plist_src" ]]; then
-        err "未找到: $plist_src"
+        err "Template file not found: $plist_src"
         return 1
     fi
 
     mkdir -p "$HOME/Library/LaunchAgents"
 
-    # 卸载旧版本（如果存在）
+    # Unload existing agent if present
     launchctl bootout "gui/$(id -u)" "$plist_dest" 2>/dev/null || true
     launchctl unload "$plist_dest" 2>/dev/null || true
 
-    # Replace __SCRIPT_DIR__ placeholder with actual script directory
+    # Substitute script directory placeholder with actual directory path
     sed "s|__SCRIPT_DIR__|$SCRIPT_DIR|g" "$plist_src" > "$plist_dest"
     launchctl bootstrap "gui/$(id -u)" "$plist_dest" 2>/dev/null || launchctl load "$plist_dest"
-    info "launchd 已加载: $plist_name"
+    info "launchd agent loaded: $plist_name"
 }
 
-# ---------- 安装 monitor plist ----------
+# Unload deprecated launchd agents and install the unified monitor service.
 install_launchd() {
     echo ""
-    echo "注册自动触发..."
+    echo "Registering launchd background daemon..."
     local old old_dest
     for old in com.user.iphone-video-backup.plist com.user.iphone-photo-backup.plist; do
         old_dest="$HOME/Library/LaunchAgents/$old"
@@ -141,6 +150,7 @@ install_launchd() {
     install_plist "com.user.iphone-backup-monitor.plist"
 }
 
+# List currently mounted non-system external volumes under /Volumes.
 list_external_volumes() {
     local vol base found=0
     for vol in /Volumes/*; do
@@ -151,51 +161,51 @@ list_external_volumes() {
         found=1
     done
     if [[ "$found" -eq 0 ]]; then
-        printf '%s' "（未检测到外置磁盘）"
+        printf '%s' "(No external drive currently detected)"
     fi
 }
 
-# ---------- 提示配置 ----------
+# Display post-installation verification and usage instructions.
 prompt_config() {
     echo ""
     echo "=================================================="
     echo ""
-    info "安装完成！"
+    info "Installation Complete!"
     echo ""
-    echo "  当前备份路径："
+    echo "  Configured Backup Paths:"
     echo "    BACKUP_ROOT=$BACKUP_ROOT"
     echo "    PHOTO_BACKUP_ROOT=$PHOTO_BACKUP_ROOT"
     echo ""
-    echo "  当前检测到的外置磁盘："
+    echo "  Detected External Drives:"
     echo "    $(list_external_volumes)"
     echo ""
-    echo "  monitor：开机/登录后常驻监听真实 iPhone 连接"
-    echo "  视频备份：接入并信任 iPhone → 自动触发（v3 内容哈希去重）"
-    echo "  照片备份：接入并信任 iPhone → 自动触发（v3 内容哈希去重）"
+    echo "  Background Daemon: Active and listening for trusted iPhone USB connections."
     echo ""
-    echo "首次使用："
-    echo "  1. 插入 iPhone，解锁，点击「信任此电脑」"
-    echo "  2. 确认外置磁盘已挂载"
-    echo "  3. 查看状态: cat /tmp/iphone_backup_monitor.status"
+    echo "Getting Started:"
+    echo "  1. Connect your iPhone via USB, unlock it, and tap 'Trust This Computer'."
+    echo "  2. Ensure your designated external drive is connected and mounted."
+    echo "  3. Check daemon status: cat /tmp/iphone_backup_monitor.status"
     echo ""
-    echo "手动测试："
+    echo "Manual Test Commands:"
     echo "  bash $SCRIPT_DIR/backup_videos_v3.sh"
     echo "  bash $SCRIPT_DIR/backup_photos_v3.sh"
+    echo "  bash $SCRIPT_DIR/import_image_capture.sh --help"
     echo ""
-    echo "日志查看："
+    echo "Log Files:"
     echo "  cat /tmp/iphone_backup_monitor.status"
     echo "  cat /tmp/iphone_backup_stdout.log"
     echo "  cat /tmp/iphone_photo_backup_stdout.log"
     echo ""
-    echo "卸载: bash $SCRIPT_DIR/uninstall.sh"
+    echo "Uninstall: bash $SCRIPT_DIR/uninstall.sh"
     echo ""
 }
 
-# ---------- 主流程 ----------
+# Main installer entry point.
 main() {
     echo ""
     echo "=================================================="
-    echo "   iPhone 视频 & 照片备份工具 - 安装程序"
+    echo "   iPhone Auto Backup - Installer"
+    echo "   Author: Vaibhav Bhootna"
     echo "=================================================="
 
     check_config

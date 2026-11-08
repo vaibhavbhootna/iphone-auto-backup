@@ -2,19 +2,19 @@
 
 # iPhone Auto Backup
 
-Auto-backup iPhone photos & videos to external drive on USB plug-in.<br>
-EXIF date archiving, content-hash dedup, zero cloud dependency.
+Auto-backup iPhone photos & videos to an external drive on USB plug-in.<br>
+EXIF date archiving, content-hash deduplication, zero cloud dependency.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey.svg)
 ![Language](https://img.shields.io/badge/language-Bash-green.svg)
 ![Dependencies](https://img.shields.io/badge/dependencies-libimobiledevice%20%2B%20exiftool-orange.svg)
-![ShellCheck](https://img.shields.io/github/actions/workflow/status/andersyin/iphone-auto-backup/shellcheck.yml?label=shellcheck)
-![Stars](https://img.shields.io/github/stars/andersyin/iphone-auto-backup?style=social)
-![Forks](https://img.shields.io/github/forks/andersyin/iphone-auto-backup?style=social)
-![Release](https://img.shields.io/github/v/release/andersyin/iphone-auto-backup)
+![ShellCheck](https://img.shields.io/github/actions/workflow/status/vbv611/iphone-auto-backup/shellcheck.yml?label=shellcheck)
+![Stars](https://img.shields.io/github/stars/vbv611/iphone-auto-backup?style=social)
+![Forks](https://img.shields.io/github/forks/vbv611/iphone-auto-backup?style=social)
+![Release](https://img.shields.io/github/v/release/vbv611/iphone-auto-backup)
 
-[English](#features) | [中文文档](#中文文档)
+**Maintained by Vaibhav Bhootna**
 
 </div>
 
@@ -22,29 +22,41 @@ EXIF date archiving, content-hash dedup, zero cloud dependency.
 
 ## Why this exists
 
-Every time you plug in your iPhone, macOS wants to open Photos.app or Image Capture — but neither gives you **automatic, deduplicated, date-sorted** backups to an external drive. iCloud costs money and locks you in. iMazing is $40+. This tool does it for free, with zero cloud, and runs entirely via `launchd` + `libimobiledevice`.
+Every time you plug in your iPhone, macOS wants to open Photos.app or Image Capture — but neither provides **automatic, deduplicated, date-sorted** backups to an external drive. Cloud storage charges recurring monthly fees and introduces vendor lock-in. Proprietary tools cost $40+. 
+
+This tool provides a lightweight, automated, and secure local backup solution with zero cloud dependencies, powered entirely via macOS `launchd` and `libimobiledevice`.
 
 ### Who is this for?
 
-- **Photographers** — auto-archive iPhone shoots by EXIF date, no manual sorting
-- **Parents** — never lose a baby photo again; plug in and it backs up
-- **Data hoarders** — content-hash dedup means zero redundant copies
-- **Privacy-conscious users** — zero cloud, zero tracking, files on your disk
-- **Anyone with an iPhone** — if you have photos on your phone, you need backup
+- **Photographers** — Auto-archive camera shoots sorted by EXIF date without manual sorting.
+- **Parents** — Plug in and back up family memories automatically every day.
+- **Data Preservationists** — Partial SHA1 content hashing guarantees zero duplicate copies.
+- **Privacy-Conscious Users** — Zero telemetry, zero cloud, files remain strictly on your local disk.
+- **iPhone Owners** — Automated peace of mind whenever your phone connects to your Mac.
+
+---
 
 ## Features
 
-- **Auto-trigger on USB plug-in** — `launchd` daemon detects iPhone connection, no manual action needed
-- **Content-hash dedup** — SHA1 of first/last 512KB + file size, never backup the same file twice
-- **EXIF date archiving** — reads `CreateDate` / `DateTimeOriginal`, sorts into `YYYY-MM-DD` folders
-- **Smart photo classification** — auto-separates camera photos / screenshots / saved images into subdirectories
-- **Device-side pre-filter** — skips download entirely when file path + size unchanged (instant pass for already-backed-up files)
-- **Integrity verification** — compares local vs device file size after AFC download, auto-retries on truncation
-- **Sleep prevention** — keeps your Mac awake during backup via `caffeinate`
-- **Desktop notifications** — macOS native notifications for start / complete / error
-- **No cloud, no vendor lock-in** — files live on your disk, plain `YYYY-MM-DD/001.mov` structure
+- **Auto-Trigger on USB Connection** — Background `launchd` daemon detects iPhone USB events automatically.
+- **Content-Hash Deduplication** — Computes SHA1 of file size + first 512KB + last 512KB to prevent duplicate copies.
+- **Collision-Proof Naming for Editors** — Formats media as `YYYYMMDD_HHMMSS_<Device>_<OriginalName>` to eliminate filename clashes in NLE editors (Premiere, DaVinci Resolve, Final Cut).
+- **Persistent SQLite History & CSV Manifest** — Records every transfer to `.backup_history.sqlite3` and generates `editor_manifest.csv` for post-production handover.
+- **macOS Extended Attributes (`xattr`)** — Stamps original filename and device name natively onto files with zero impact on media bytes.
+- **EXIF Date Archiving** — Reads `DateTimeOriginal` / `CreateDate` tags and sorts files into `YYYY-MM-DD` directory trees.
+- **Intelligent Classification** — Categorizes media into `Photos/`, `Screenshots/`, and `Saved_Images/` using Apple `sips`.
+- **Apple ProRAW & Native Formats** — Full support for `.DNG`, `.HEIC`, `.MOV`, `.MP4`, `.PNG`, and `.JPG`.
+- **Incremental Device-Side Pre-Filtering** — Fast-paths previously transferred media using UDID-isolated cache keys.
+- **Integrity Verification** — Validates local file size against device-side `st_size` with automated single-retry on truncation.
+- **Sleep Prevention** — Holds system awake during active transfers using macOS `caffeinate`.
+- **Desktop Notifications** — Emits native macOS user notifications for start, completion, and error states.
+- **Original Capture Timestamping** — Aligns local file access and modification times (`mtime`) with camera capture dates.
+- **Image Capture & External Migration** — Ingest or index media previously copied via Apple Image Capture to prevent duplicate downloads.
+- **Zero Cloud Dependency** — Direct Apple File Conduit (AFC) extraction directly to your external drive.
 
-## How it works
+---
+
+## How It Works
 
 ```
 iPhone (USB)
@@ -57,7 +69,7 @@ iPhone (USB)
            │ iPhone detected & trusted
            ▼
     ┌──────┴──────┐
-    ▼             ▼
+    ▼             ▼ (Sequential Execution)
  backup_videos   backup_photos
     │             │
     │  ┌──────────┘
@@ -65,13 +77,13 @@ iPhone (USB)
  Scan DCIM via afcclient
     │
     ▼
- Device-side pre-filter ──── skip (path+size unchanged)
+ Device-side pre-filter ──── skip (UDID + path + size unchanged)
     │
     ▼
- Download via AFC
+ Download via AFC to secure staging
     │
     ▼
- Size verify (retry on truncation)
+ Size verify (auto-retry on truncation)
     │
     ▼
  Content hash dedup ──────── skip (hash already seen)
@@ -80,7 +92,7 @@ iPhone (USB)
  Read EXIF date ──→ fallback: filename ──→ device mtime ──→ _unknown_date
     │
     ▼
- Classify (photo/screenshot/saved)   ← photos only
+ Classify (Photos / Screenshots / Saved Images)   ← photos only
     │
     ▼
  Archive → /Volumes/Drive/iPhone_Photos/Photos/2026-04-09/001.heic
@@ -89,290 +101,277 @@ iPhone (USB)
  Set file mtime = EXIF timestamp
     │
     ▼
- macOS notification ✅
+ macOS desktop notification ✅
 ```
+
+---
 
 ## Quick Start
 
 ```bash
-# 1. Clone
-git clone https://github.com/andersyin/iphone-auto-backup.git
+# 1. Clone repository
+git clone https://github.com/vbv611/iphone-auto-backup.git
 cd iphone-auto-backup
 
-# 2. Edit config FIRST — install refuses the YourExternalDrive placeholders
+# 2. Edit configuration (set your drive paths)
 nano config.sh
-# Set BACKUP_ROOT and PHOTO_BACKUP_ROOT to your disk, e.g.
-#   BACKUP_ROOT="/Volumes/MyDrive/iPhone_Videos"
-#   PHOTO_BACKUP_ROOT="/Volumes/MyDrive/iPhone_Photos"
+# Set BACKUP_ROOT and PHOTO_BACKUP_ROOT to your drive, e.g.:
+#   BACKUP_ROOT="/Volumes/MyExternalDrive/iPhone_Videos"
+#   PHOTO_BACKUP_ROOT="/Volumes/MyExternalDrive/iPhone_Photos"
 
-# 3. Install (Homebrew deps + launchd). Apple Silicon and Intel brew prefixes are auto-detected.
+# 3. Install dependencies and register launchd daemon
 bash install.sh
 ```
 
-### First run
+### First Run Walkthrough
 
-1. Mount the external drive named in `config.sh`.
-2. Plug in the iPhone, unlock it, and tap **Trust This Computer**.
-3. Watch progress: `cat /tmp/iphone_backup_monitor.status`
-4. Optional smoke test without waiting for USB: `bash backup_videos_v3.sh` / `bash backup_photos_v3.sh`
+1. Mount the external drive configured in `config.sh`.
+2. Connect your iPhone via USB, unlock it, and tap **"Trust This Computer"**.
+3. Monitor status in real-time: `cat /tmp/iphone_backup_monitor.status`
+4. Run an optional smoke test manually:
+   ```bash
+   bash backup_videos_v3.sh
+   bash backup_photos_v3.sh
+   ```
 
-Backup scripts will not create a fake folder under `/Volumes` if the disk is unmounted; they notify and exit instead.
+> [!NOTE]
+> Backup scripts will never create dummy folders on your internal Mac boot drive if the external drive is unmounted; they notify and exit safely instead.
+
+---
+
+### Migrating from Apple Image Capture or External Folders
+
+If you already copied photos and videos from your iPhone using Apple **Image Capture** or Finder to an external drive, you can integrate them seamlessly without downloading duplicates when connecting your phone:
+
+```bash
+# Option 1: Organize flat folder into date-based backup directories and index
+bash import_image_capture.sh /Volumes/MyExternalDrive/Old_Image_Capture_Dump
+
+# Option 2: Keep your existing folder untouched, but index all files so the iPhone won't duplicate them
+bash import_image_capture.sh --index-only /Volumes/MyExternalDrive/My_Existing_Photos
+
+# Option 3: Test what will happen without making any changes
+bash import_image_capture.sh --dry-run /Volumes/MyExternalDrive/Old_Image_Capture_Dump
+```
+
+See the [Operations Guide](docs/OPERATIONS_GUIDE.md#7-migrating--importing-media-from-image-capture-or-external-folders) for detailed options.
+
+---
+
+### Upgrading Existing Backups to the Collision-Proof Format
+
+If you have existing backups created with sequential names (`001.mov`, `001.heic`), you can upgrade them in-place to the new collision-proof format without re-downloading anything or losing deduplication indexes:
+
+```bash
+# 1. Preview what will be renamed (safe dry-run mode):
+bash migrate_existing_data.sh --dry-run
+
+# 2. Execute migration live:
+bash migrate_existing_data.sh --run
+
+# 3. Optional: supply an explicit device name instead of auto-detecting from EXIF:
+bash migrate_existing_data.sh --run --device "Vaibhavs_iPhone"
+```
+
+* **Preserves Bit-for-Bit Integrity:** Media streams are unchanged; deduplication hashes remain 100% valid.
+* **Pairs Companion Files:** `.aae` edit sidecars are automatically renamed to match their photo pair.
+* **Generates Manifests:** Populates `.backup_history.sqlite3` and exports `editor_manifest.csv`.
+
+---
 
 ## Terminal Demo
 
 ```
 $ bash backup_videos_v3.sh
 
-[14:23:01] ==== iPhone 视频备份 v3 ====
-[OK] iPhone 已连接
-[14:23:01] 已阻止 Mac 睡眠 (PID 48291)
-[14:23:01] 正在扫描 iPhone...
-[OK] 发现 47 个视频
+[14:23:01] ==== iPhone Video Backup v3 ====
+[OK] iPhone connected
+[14:23:01] Mac sleep prevented (caffeinate PID 48291)
+[14:23:01] Scanning iPhone camera roll for videos...
+[OK] Found 47 video(s)
 
   45% |████████████░░░░░░░░░░░░| 21/47  IMG_4523.MOV
-[OK] IMG_4523.MOV → 2026-04-07/001.mov
-[SKIP] 内容重复: IMG_4524.MOV
-[OK] IMG_4525.MOV → 2026-04-07/002.mov
+[OK] IMG_4523.MOV -> 2026-04-07/001.mov
+[SKIP] Duplicate content: IMG_4524.MOV
+[OK] IMG_4525.MOV -> 2026-04-07/002.mov
   ...
-[OK] IMG_4569.MOV → 2026-04-09/003.mov
+[OK] IMG_4569.MOV -> 2026-04-09/003.mov
 
 ======================================================================
-                    iPhone 视频备份报告
+                    iPhone Video Backup Report
+                    Author: Vaibhav Bhootna
 ======================================================================
-同步文件夹:   /Volumes/MyDrive/iPhone_Videos
-  共计:       482 个视频文件
-  新增:       12 个视频
-  跳过:       35 个（已存在/内容重复，其中 28 个设备侧未变、免下载秒过）
-  失败:       0 个
+Destination:  /Volumes/MyDrive/iPhone_Videos
+Total:        482 video file(s)
+New:          12 video(s)
+Skipped:      35 (28 skipped instantly via pre-filter)
+Failed:       0 video(s)
 ======================================================================
 ```
 
+---
+
 ## Comparison
 
-| Feature | iCloud Photos | Image Capture | iMazing | **This tool** |
+| Feature | iCloud Photos | Image Capture | iMazing | **This Tool** |
 |---------|:---:|:---:|:---:|:---:|
-| Free | 5GB limit | Yes | $40+ | **Yes** |
-| Auto on USB plug-in | No (Wi-Fi) | No (manual) | Yes | **Yes** |
-| Content-hash dedup | No | No | No | **Yes** |
-| Sort by EXIF date | No | No | Yes | **Yes** |
-| Photo classification | No | No | No | **Yes** |
-| Incremental (skip seen) | N/A | No | Yes | **Yes** (device-side) |
-| No cloud dependency | No | Yes | Yes | **Yes** |
-| Open source | N/A | No | No | **Yes** |
-| File mtime = shoot date | N/A | No | No | **Yes** |
+| **Cost** | 5GB free limit | Free | $40+ | **Free & Open Source** |
+| **Auto-trigger on USB** | No (Wi-Fi) | No (Manual) | Yes | **Yes (launchd)** |
+| **Content-hash dedup** | No | No | No | **Yes (SHA1)** |
+| **Sort by EXIF date** | No | No | Yes | **Yes** |
+| **Photo classification** | No | No | No | **Yes (sips)** |
+| **Incremental pre-filter** | N/A | No | Yes | **Yes (UDID-scoped)** |
+| **No cloud dependency** | No | Yes | Yes | **Yes (100% Local)** |
+| **File mtime = shoot date** | N/A | No | No | **Yes** |
+
+---
 
 ## Backup Structure
 
 ```
-/Volumes/YourDrive/iPhone_Videos/
-└── 2026-04-07/
-    ├── 001.mov
-    └── 002.mov
-
-/Volumes/YourDrive/iPhone_Photos/
-├── Photos/
-│   └── 2026-04-09/
-│       ├── 001.jpg
-│       └── 002.heic
-├── Screenshots/
-│   └── 2026-04-10/
-│       └── 001.png
-└── Saved_Images/
-    └── 2026-04-10/
-        └── 001.gif
+/Volumes/YourDrive/
+├── .backup_history.sqlite3                      # Complete queryable backup database
+├── editor_manifest.csv                          # Handover manifest for video/photo editors
+│
+├── iPhone_Videos/
+│   └── 2026-04-07/
+│       ├── 20260407_143000_Vaibhavs_iPhone_IMG_0042.mov
+│       └── 20260407_143512_Vaibhavs_iPhone_IMG_0043.mov
+│
+└── iPhone_Photos/
+    ├── Photos/
+    │   └── 2026-04-09/
+    │       ├── 20260409_091522_Vaibhavs_iPhone_IMG_1021.heic
+    │       ├── 20260409_091522_Vaibhavs_iPhone_IMG_1021.aae    # Companion edit sidecar
+    │       └── 20260409_091804_Vaibhavs_iPhone_IMG_1022.dng
+    ├── Screenshots/
+    │   └── 2026-04-10/
+    │       └── 20260410_182045_Vaibhavs_iPhone_IMG_1023.png
+    └── Saved_Images/
+        └── 2026-04-10/
+            └── 20260410_200511_Vaibhavs_iPhone_IMG_1024.gif
 ```
+
+---
+
+## Editor Handover & Manifest Tool
+
+Export clean CSV spreadsheets for editors or query backup history:
+
+```bash
+# Export full manifest for editor:
+bash export_editor_manifest.sh /Volumes/YourDrive/editor_manifest.csv
+
+# Export only videos shot in November 2026:
+bash export_editor_manifest.sh --videos --date 2026-11 videos_nov_2026.csv
+
+# Search which backed up file corresponds to IMG_4521.MOV:
+bash export_editor_manifest.sh --search IMG_4521
+
+# Display storage and camera statistics:
+bash export_editor_manifest.sh --stats
+```
+
+---
 
 ## Configuration (`config.sh`)
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `BACKUP_ROOT` | Video backup target path | `/Volumes/YourExternalDrive/iPhone_Videos` |
-| `PHOTO_BACKUP_ROOT` | Photo backup target path | `/Volumes/YourExternalDrive/iPhone_Photos` |
+| `BACKUP_ROOT` | Target path for video backups | `/Volumes/YourExternalDrive/iPhone_Videos` |
+| `PHOTO_BACKUP_ROOT` | Target path for photo backups | `/Volumes/YourExternalDrive/iPhone_Photos` |
 | `VIDEO_EXTENSIONS` | Supported video formats | `MOV MP4 M4V 3GP AVI MKV` |
-| `PHOTO_EXTENSIONS` | Supported photo formats | `JPG JPEG HEIC PNG GIF` |
-| `AUTO_REFRESH_INDEX` | Run optional sibling `refresh_index.sh` after backup (not shipped here) | `0` (off) |
+| `PHOTO_EXTENSIONS` | Supported photo formats | `JPG JPEG HEIC PNG GIF DNG` |
+| `FILENAME_FORMAT` | Naming style (`timestamp_device_original`, `timestamp_original`, `device_original`, `original`, `sequential`) | `timestamp_device_original` |
+| `BACKUP_HISTORY_DB` | Custom SQLite database path (defaults to root of backup volume) | `""` (auto-located) |
+| `AUTO_EXPORT_MANIFEST` | Automatically generate/refresh `editor_manifest.csv` after backup | `1` (enabled) |
+| `AUTO_REFRESH_INDEX` | Execute optional indexer post-backup | `0` (off) |
+
+---
 
 ## Dependencies
 
-| Tool | Purpose | Install |
-|------|---------|---------|
-| `libimobiledevice` | iPhone communication (afcclient / idevicepair) | `brew install libimobiledevice` |
-| `exiftool` | Read EXIF dates from photos/videos | `brew install exiftool` |
+| Tool | Purpose | Installation |
+|------|---------|--------------|
+| `libimobiledevice` | Native iOS USB protocol communication (`afcclient`, `idevicepair`) | `brew install libimobiledevice` |
+| `exiftool` | Extracts EXIF dates and camera metadata | `brew install exiftool` |
 
-> No macFUSE / ifuse needed. Only macOS built-in tools + 2 Homebrew packages.
+---
 
-## Requirements
+## Documentation Suite
 
-- macOS (Apple Silicon or Intel; Homebrew tools are resolved from `/opt/homebrew/bin`, `/usr/local/bin`, or `PATH`)
-- iPhone with USB connection (must click "Trust This Computer")
-- External drive or designated backup directory (edit `config.sh` before `install.sh`)
+Comprehensive engineering documentation is available in [`docs/`](docs/README.md):
+- [Architecture & Technical Design](docs/ARCHITECTURE.md)
+- [Security Audit & Vulnerabilities](docs/SECURITY_AUDIT.md)
+- [Reliability & Edge-Case Engineering Analysis](docs/RELIABILITY_ANALYSIS.md)
+- [Operations, Maintenance & Troubleshooting Manual](docs/OPERATIONS_GUIDE.md)
 
-## Manual Run
-
-```bash
-bash backup_videos_v3.sh    # backup videos
-bash backup_photos_v3.sh    # backup photos
-```
-
-## Logs
-
-```bash
-cat /tmp/iphone_backup_monitor.status    # monitor state
-cat /tmp/iphone_backup_stdout.log        # video backup log
-cat /tmp/iphone_photo_backup_stdout.log  # photo backup log
-```
+---
 
 ## File Structure
 
 ```
 iphone-auto-backup/
-├── config.sh                             # Configuration (edit before first use)
-├── backup_videos_v3.sh                   # Video backup script
-├── backup_photos_v3.sh                   # Photo backup script
-├── backup_safe.sh                        # Simple backup (v1, copy-only, no dedup)
-├── iphone_backup_monitor.sh              # Device watcher daemon
-├── rebuild_hash_index.sh                 # Hash index rebuild tool
-├── install.sh                            # One-click install (registers launchd)
-├── uninstall.sh                          # Uninstall launchd
-├── com.user.iphone-backup-monitor.plist  # launchd config (monitor)
-├── com.user.iphone-video-backup.plist    # launchd config (legacy video)
-└── com.user.iphone-photo-backup.plist    # launchd config (legacy photo)
+├── config.sh                             # Configuration (target paths, formats)
+├── backup_videos_v3.sh                   # Video backup engine
+├── backup_photos_v3.sh                   # Photo backup engine
+├── backup_safe.sh                        # Safe copy utility (v1 legacy)
+├── iphone_backup_monitor.sh              # USB connection watcher daemon
+├── import_image_capture.sh               # Image Capture & external folder importer / indexer
+├── rebuild_hash_index.sh                 # Hash index rebuild and maintenance tool
+├── install.sh                            # One-click installer (Homebrew + launchd)
+├── uninstall.sh                          # Uninstaller (removes launchd services)
+├── com.user.iphone-backup-monitor.plist  # launchd configuration (monitor daemon)
+├── com.user.iphone-video-backup.plist    # launchd configuration (legacy video)
+├── com.user.iphone-photo-backup.plist    # launchd configuration (legacy photo)
+└── docs/                                 # Engineering documentation
+    ├── ARCHITECTURE.md                   # System design & sequence flows
+    ├── SECURITY_AUDIT.md                 # Vulnerability report & hardening
+    ├── RELIABILITY_ANALYSIS.md           # Failure points, edge cases & limits
+    └── OPERATIONS_GUIDE.md               # User guide & operations manual
 ```
+
+---
 
 ## FAQ
 
-**Q: Backup doesn't auto-trigger?**
-A: Make sure you clicked "Trust This Computer" on the iPhone. Re-run `bash install.sh` to re-register launchd. Check `cat /tmp/iphone_backup_monitor.status`.
+**Q: Backup doesn't auto-trigger when USB is plugged in?**  
+A: Ensure your iPhone is unlocked and you tapped "Trust This Computer". Verify daemon status via `cat /tmp/iphone_backup_monitor.status`.
 
-**Q: Same video backed up twice?**
-A: v3 uses content-hash dedup (first/last 512KB + file size → SHA1). The hash index lives at `~/.iphone_video_backup_v3.hashes`.
+**Q: Same file backed up twice?**  
+A: v3 uses partial SHA1 content-hash deduplication. The hash database resides in `~/.iphone_video_backup_v3.hashes` and `~/.iphone_photo_backup_v3.hashes`.
 
-**Q: `install.sh` exits and says config still has placeholders?**
-A: Edit `config.sh` first. `YourExternalDrive` is a sample name; install will not register launchd until `BACKUP_ROOT` and `PHOTO_BACKUP_ROOT` point at a real path.
+**Q: `install.sh` refuses to install due to placeholders?**  
+A: Edit `config.sh` first. Replace `YourExternalDrive` with the name of your mounted external storage volume.
 
-**Q: External drive wasn't mounted, backup failed?**
-A: The script notifies you and exits without creating a fake directory under `/Volumes`. Mount the disk and re-run:
+**Q: How do I uninstall the automatic background trigger?**  
+A: Run `bash uninstall.sh`. Your scripts, backup files, and deduplication databases will remain completely intact.
+
+---
+
+## Uninstall & Maintenance
+
 ```bash
-bash backup_videos_v3.sh
-bash backup_photos_v3.sh
-```
-
-**Q: How to uninstall auto-trigger?**
-```bash
+# Remove background launchd daemon
 bash uninstall.sh
-```
-This only removes the launchd config. Scripts, backup data, and hash indexes are untouched.
 
-## Uninstall
-
-```bash
-bash uninstall.sh
-```
-
-To wipe indexes only (backup files stay):
-```bash
+# Reset deduplication index caches (re-evaluates all files on next run)
 rm -f ~/.iphone_video_backup_v3.hashes ~/.iphone_photo_backup_v3.hashes
 rm -f ~/.iphone_video_backup_v3.device_seen ~/.iphone_photo_backup_v3.device_seen
 rm -f ~/.iphone_video_backup_v3.state ~/.iphone_photo_backup_v3.state
+
+# Rebuild hash index from existing backup drive
+bash rebuild_hash_index.sh --all
 ```
 
-To delete backup files, use the paths from your `config.sh` — do not copy the placeholder `/Volumes/YourExternalDrive/...`.
+---
 
 ## Contributing
 
-Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md).
+Contributions and improvements are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md).
+
+---
 
 ## License
 
-[MIT](LICENSE)
-
----
-
-## 中文文档
-
-iPhone 插入 Mac 时自动备份视频和照片到外置硬盘，按 EXIF 拍摄日期归档，内容哈希精确去重，零云依赖。
-
-### 特性
-
-- **自动触发**：iPhone 插入 USB 即自动备份，无需手动操作
-- **内容哈希去重**：首尾 512KB + 文件大小 → SHA1，同一内容不会重复备份
-- **按拍摄日期归档**：读取 EXIF CreateDate，自动按 `YYYY-MM-DD` 分文件夹
-- **照片智能分类**：自动区分相机照片 / 截图 / 保存的图片，分目录存放
-- **增量预筛**：设备路径+文件大小未变 → 跳过下载，秒过已有文件
-- **完整性校验**：AFC 下载后比对设备侧文件大小，截断自动重试
-- **防睡眠**：备份期间阻止 Mac 休眠
-- **桌面通知**：备份开始/完成/异常均推送 macOS 通知
-
-### 快速开始
-
-```bash
-git clone https://github.com/andersyin/iphone-auto-backup.git
-cd iphone-auto-backup
-nano config.sh     # 必须先改路径；install 会拒绝 YourExternalDrive 占位名
-bash install.sh    # 自动安装依赖 + 注册 launchd（Apple Silicon / Intel Homebrew 均可）
-```
-
-插入 iPhone → 解锁并点击「信任此电脑」→ 确认外置盘已挂载 → 自动开始备份。
-查看状态：`cat /tmp/iphone_backup_monitor.status`
-
-### 配置说明
-
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| `BACKUP_ROOT` | 视频备份目标路径 | `/Volumes/YourExternalDrive/iPhone_Videos` |
-| `PHOTO_BACKUP_ROOT` | 照片备份目标路径 | `/Volumes/YourExternalDrive/iPhone_Photos` |
-| `VIDEO_EXTENSIONS` | 支持的视频格式 | `MOV MP4 M4V 3GP AVI MKV` |
-| `PHOTO_EXTENSIONS` | 支持的照片格式 | `JPG JPEG HEIC PNG GIF` |
-| `AUTO_REFRESH_INDEX` | 备份后跑可选的 `refresh_index.sh`（本仓库不附带） | `0`（关闭） |
-
-### 依赖
-
-| 工具 | 用途 | 安装方式 |
-|------|------|----------|
-| `libimobiledevice` | iPhone 通信协议 | `brew install libimobiledevice` |
-| `exiftool` | 读取拍摄日期 | `brew install exiftool` |
-
-### 常见问题
-
-**Q: 备份没有自动触发？**
-A: 确认 iPhone 已点击「信任此电脑」；重新运行 `bash install.sh`；检查 `cat /tmp/iphone_backup_monitor.status`。
-
-**Q: 重复备份同一个视频？**
-A: v3 使用内容哈希去重，哈希索引位于 `~/.iphone_video_backup_v3.hashes`。
-
-**Q: 安装时报占位路径？**
-A: 先改 `config.sh` 里的 `BACKUP_ROOT` / `PHOTO_BACKUP_ROOT`，再运行 `bash install.sh`。
-
-**Q: 怎么卸载？**
-```bash
-bash uninstall.sh
-```
-
-<div align="center">
-
-**If this tool saved your photos, consider giving it a ⭐**
-
-[Report a bug](https://github.com/andersyin/iphone-auto-backup/issues/new?template=bug_report.md) ·
-[Request a feature](https://github.com/andersyin/iphone-auto-backup/issues/new?template=feature_request.md) ·
-[Contributing](CONTRIBUTING.md)
-
-</div>
-
----
-
-## You might also like
-
-- [restic-backup-toolkit](https://github.com/andersyin/restic-backup-toolkit) — 3-tier macOS backup: rsync mirror + restic cold backup + SHA256 audit
-- [md-reader](https://github.com/andersyin/md-reader) — Zero-dependency single-file HTML markdown reader, 77KB, no install
-
----
-
-## Star History
-
-<div align="center">
-
-<a href="https://star-history.com/#andersyin/iphone-auto-backup&Date">
-  <img src="https://api.star-history.com/svg?repos=andersyin/iphone-auto-backup&type=Date" alt="Star History Chart" width="600">
-</a>
-
-</div>
+[MIT](LICENSE) © 2026 Vaibhav Bhootna

@@ -1,25 +1,49 @@
 #!/bin/bash
+# ==============================================================================
+# iPhone Auto Backup - Connection Monitor Daemon
+# Author: Vaibhav Bhootna
+# Repository: https://github.com/vbv611/iphone-auto-backup
 #
-# iPhone backup monitor: watches libimobiledevice for a real iPhone, then runs
-# video and photo backup once per connection session.
+# This persistent daemon is supervised by macOS launchd. It monitors the USB
+# bus via libimobiledevice for trusted iPhone connections and coordinates
+# sequential video and photo backups.
+# ==============================================================================
 
 set -u
+umask 077
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=config.sh
 source "$SCRIPT_DIR/config.sh"
+
 STATUS_FILE="/tmp/iphone_backup_monitor.status"
 LOCKDIR="/tmp/iphone_backup_monitor.lockdir"
+TRIGGER_FILE="/tmp/iphone_backup_manual.trigger"
 : "${IPHONE_MONITOR_INTERVAL:=10}"
+: "${IPHONE_SAME_CONN:=once}"
+: "${IPHONE_RESYNC_INTERVAL:=300}"
 
+# Display a native macOS notification safely using positional arguments.
+# Arguments:
+#   $1 - Title
+#   $2 - Message body
 notify() {
     local title="$1" msg="$2"
     command -v osascript >/dev/null 2>&1 || return 0
-    title=$(printf "%s" "$title" | sed 's/"/\\"/g')
-    msg=$(printf "%s" "$msg" | sed 's/"/\\"/g')
-    osascript -e "display notification \"$msg\" with title \"$title\"" 2>/dev/null || true
+    osascript - "$title" "$msg" <<'APPLESCRIPT' 2>/dev/null || true
+on run argv
+    set theTitle to item 1 of argv
+    set theMsg to item 2 of argv
+    display notification theMsg with title theTitle
+end run
+APPLESCRIPT
 }
 
+# Write current monitor state to status tracking file.
+# Arguments:
+#   $1 - State (e.g. watching, running, done, waiting_trust)
+#   $2 - Device UDID (optional)
+#   $3 - Diagnostic details (optional)
 write_status() {
     local state="$1" device="${2:-}" detail="${3:-}"
     {
@@ -30,39 +54,53 @@ write_status() {
     } > "$STATUS_FILE"
 }
 
-
+# Retrieve connected device UDID (first connected device).
+# Returns:
+#   Outputs UDID string or empty if no device connected.
 devices() {
-    "$IDEVICE_ID" -l 2>/dev/null | tr '\n' ' ' | sed 's/[[:space:]]*$//'
+    "$IDEVICE_ID" -l 2>/dev/null | head -n 1 | tr -d '[:space:]'
 }
 
+# Validate pairing and trust status for the specified UDID.
+# Arguments:
+#   $1 - Device UDID
+# Returns:
+#   0 if validated, 1 otherwise.
 trusted() {
-    "$IDEVICEPAIR" validate 2>&1 | grep -Eiq 'success|valid'
+    local udid="${1:-}"
+    local -a args=("validate")
+    [[ -n "$udid" ]] && args=("-u" "$udid" "validate")
+    "$IDEVICEPAIR" "${args[@]}" 2>&1 | grep -Eiq 'success|valid'
 }
 
+# Execute video and photo backups sequentially for the active device.
+# Arguments:
+#   $1 - Device UDID
+# Returns:
+#   0 on full success; 1 if any worker failed.
 run_backups() {
     local device="$1"
-    notify "iPhone 已接入" "开始自动备份视频和照片。"
+    notify "iPhone Connected" "Starting automatic backup of videos and photos."
     write_status "running" "$device" "video+photo backup"
 
-    IPHONE_BACKUP_QUIET_NO_DEVICE=1 bash "$SCRIPT_DIR/backup_videos_v3.sh" &
-    local video_pid=$!
-    IPHONE_BACKUP_QUIET_NO_DEVICE=1 bash "$SCRIPT_DIR/backup_photos_v3.sh" &
-    local photo_pid=$!
-
-    wait "$video_pid"; local video_rc=$?
-    wait "$photo_pid"; local photo_rc=$?
+    # Execute video and photo backups sequentially to eliminate USB/AFC socket contention
+    IPHONE_BACKUP_QUIET_NO_DEVICE=1 IPHONE_UDID="$device" bash "$SCRIPT_DIR/backup_videos_v3.sh"
+    local video_rc=$?
+    IPHONE_BACKUP_QUIET_NO_DEVICE=1 IPHONE_UDID="$device" bash "$SCRIPT_DIR/backup_photos_v3.sh"
+    local photo_rc=$?
 
     if [[ "$video_rc" -eq 0 && "$photo_rc" -eq 0 ]]; then
         write_status "done" "$device" "video_rc=0 photo_rc=0"
-        notify "iPhone 自动备份完成" "视频和照片任务已结束；如有新增会自动刷新媒体索引。"
+        notify "iPhone Backup Complete" "Video and photo backups finished successfully."
         return 0
     fi
 
     write_status "failed" "$device" "video_rc=$video_rc photo_rc=$photo_rc"
-    notify "iPhone 自动备份异常" "视频返回 $video_rc，照片返回 $photo_rc；请查看 /tmp/iphone_* 日志。"
+    notify "iPhone Backup Warning" "Video returned $video_rc, photo returned $photo_rc. Check /tmp/iphone_* logs."
     return 1
 }
 
+# Acquire daemon lock directory to prevent duplicate instances
 if ! mkdir "$LOCKDIR" 2>/dev/null; then
     old_pid=$(cat "$LOCKDIR/pid" 2>/dev/null || true)
     if [[ -n "$old_pid" ]] && kill -0 "$old_pid" 2>/dev/null; then
@@ -79,22 +117,17 @@ previous_device=$(grep '^device=' "$STATUS_FILE" 2>/dev/null | cut -d= -f2- || t
 last_device=""
 backed_up_device=""
 last_backup_ts=0
+
+# Avoid re-scanning on daemon restart if device remains connected from prior session
 if [[ ( "$previous_state" == "watching_connected" || "$previous_state" == "done" ) && -n "$previous_device" ]]; then
-    # 监听器自身重启不等于物理重插；同一主动连接只备一次，避免重复全量扫描。
-    # （failed 不在此列：失败的轮次允许重启后自动重试。）
     last_device="$previous_device"
     backed_up_device="$previous_device"
 fi
-# 同一连接备份策略（2026-08-04 用户拍板）：
-#   once   （默认）同一主动连接只自动备份一次；再备走手动触发（控制台「立即备份」
-#          写 TRIGGER_FILE）或拔插重连
-#   resync 旧行为——同一连接每 IPHONE_RESYNC_INTERVAL 秒自动复查新文件
-: "${IPHONE_SAME_CONN:=once}"
-: "${IPHONE_RESYNC_INTERVAL:=300}"
-TRIGGER_FILE="/tmp/iphone_backup_manual.trigger"
+
 trust_notice_at=0
 write_status "watching" "" "interval=${IPHONE_MONITOR_INTERVAL}s same_conn=${IPHONE_SAME_CONN}"
 
+# Main polling loop
 while true; do
     current="$(devices)"
     if [[ -z "$current" ]]; then
@@ -111,22 +144,22 @@ while true; do
     fi
 
     last_device="$current"
-    if ! trusted; then
+    if ! trusted "$current"; then
         now=$(date +%s)
         write_status "waiting_trust" "$current" "unlock iPhone and trust this computer"
         if (( now - trust_notice_at >= 60 )); then
-            notify "iPhone 等待授权" "请解锁手机并点击「信任此电脑」。"
+            notify "iPhone Awaiting Trust" "Please unlock your iPhone and tap 'Trust This Computer'."
             trust_notice_at=$now
         fi
         sleep "$IPHONE_MONITOR_INTERVAL"
         continue
     fi
 
-    # 手动开关：控制台「立即备份」写触发文件；消费一次 = 立即跑一轮
+    # Manual backup trigger: consuming trigger file forces an immediate backup pass
     if [[ -f "$TRIGGER_FILE" ]]; then
         rm -f "$TRIGGER_FILE"
         backed_up_device=""
-        notify "iPhone 手动备份" "已触发新一轮备份（已有文件秒过，只拷新增）。"
+        notify "Manual Backup Triggered" "Starting backup pass (already backed up files are skipped instantly)."
     fi
 
     now_ts=$(date +%s)
@@ -135,8 +168,6 @@ while true; do
         backed_up_device="$current"
         last_backup_ts=$(date +%s)
     elif [[ "$IPHONE_SAME_CONN" == "resync" ]] && (( now_ts - last_backup_ts >= IPHONE_RESYNC_INTERVAL )); then
-        # resync 模式（旧行为）：同一连接超过 IPHONE_RESYNC_INTERVAL 秒，重新检查新文件
-        # （device_seen 预筛会让已有文件秒过）
         write_status "resync_check" "$current" "checking for new files (resync interval)"
         run_backups "$current" || true
         last_backup_ts=$(date +%s)
